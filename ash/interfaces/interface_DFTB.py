@@ -14,9 +14,9 @@ import ash.settings_ash
 class DFTBTheory():
     def __init__(self, dftbdir=None, hamiltonian="XTB", xtb_method="GFN2-xTB", printlevel=2, label="DFTB",
                  numcores=1, slaterkoster_dict=None, maxmom_dict=None, hubbard_derivs_dict=None, Gauss_blur_width=0.0,
-                 SCC=True, ThirdOrderFull=False, ThirdOrder=False, hcorrection_zeta=None,
+                 SCC=True, ThirdOrderFull=False, ThirdOrder=False, hcorrection_zeta=None, electronic_temp=None,
                  MaxSCCIterations=300, periodic=False, periodic_cell_vectors=None,
-                 periodic_cell_dimensions=None, kpoint_values=[1,1,1]):
+                 periodic_cell_dimensions=None, kpoint_values=[1,1,1], solver=None):
 
         self.theorynamelabel="DFTB"
         self.label=label
@@ -43,6 +43,8 @@ class DFTBTheory():
         self.Gauss_blur_width=Gauss_blur_width
         self.hubbard_derivs_dict=hubbard_derivs_dict
         self.hcorrection_zeta=hcorrection_zeta
+        self.electronic_temp=electronic_temp
+        self.solver=solver
 
         # Second-order DFTB2
         self.SCC=SCC
@@ -177,13 +179,13 @@ class DFTBTheory():
         write_DFTB_input(self.hamiltonian,self.xtb_method,xyzfilename+'.xyz',qm_elems,current_coords,charge,mult, PC=PC, Grad=Grad,
                          slaterkoster_dict=self.slaterkoster_dict, maxmom_dict=self.maxmom_dict, MMcharges=MMcharges, MMcoords=current_MM_coords,
                          Gauss_blur_width=self.Gauss_blur_width, SCC=self.SCC, ThirdOrderFull=self.ThirdOrderFull, ThirdOrder=self.ThirdOrder,
-                         hubbard_derivs_dict=self.hubbard_derivs_dict, hcorrection_zeta=self.hcorrection_zeta,
+                         hubbard_derivs_dict=self.hubbard_derivs_dict, hcorrection_zeta=self.hcorrection_zeta,electronic_temp=self.electronic_temp,
                          MaxSCCIterations=self.MaxSCCIterations, periodic=self.periodic,
-                         periodic_cell_vectors=self.periodic_cell_vectors, kpoint_values=self.kpoint_values)
+                         periodic_cell_vectors=self.periodic_cell_vectors, kpoint_values=self.kpoint_values, solver=self.solver)
 
         print_time_rel(module_init_time, modulename=f'DFTB prep-run', moduleindex=3)
         # Run DFTB
-        run_DFTB(self.dftbdir, inputfile="dftb_in.hsd", outputfile="dftb+.out")
+        run_DFTB(self.dftbdir, inputfile="dftb_in.hsd", outputfile="dftb+.out", numcores=numcores)
         print_time_rel(module_init_time, modulename=f'DFTB run-done', moduleindex=3)
 
         # Grab energy
@@ -218,10 +220,10 @@ class DFTBTheory():
             print_time_rel(module_init_time, modulename=f'{self.theorynamelabel} run', moduleindex=2)
             return self.energy
 #
-def write_DFTB_input(hamiltonian,xtbmethod,xyzfilename, elems,coords,charge,mult, PC=False, MMcharges=None, MMcoords=None, Grad=False, SCC=True,
+def write_DFTB_input(hamiltonian,xtbmethod,xyzfilename, elems,coords,charge,mult,electronic_temp=None, PC=False, MMcharges=None, MMcoords=None, Grad=False, SCC=True,
                      slaterkoster_dict=None, maxmom_dict=None, Gauss_blur_width=0.0, ThirdOrderFull=False, ThirdOrder=False,
                      hubbard_derivs_dict=None, hcorrection_zeta=None, MaxSCCIterations=300,
-                     periodic=False, periodic_cell_vectors=None, kpoint_values=[1,1,1]):
+                     periodic=False, periodic_cell_vectors=None, kpoint_values=[1,1,1], solver=None):
 
     # Open file
     f = open("dftb_in.hsd", "w")
@@ -267,6 +269,10 @@ def write_DFTB_input(hamiltonian,xtbmethod,xyzfilename, elems,coords,charge,mult
     method1=f"Hamiltonian = {hamiltonian}" +"{"+"\n"
     inputlines.append(method1)
     inputlines.append(f"Charge = {charge}\n")
+    if solver is not None:
+        inputlines.append("Solver = " + f"{solver}" + " {}\n")
+    if electronic_temp is not None:
+        inputlines.append("Filling = Fermi { Temperature [Kelvin] = " + f"{electronic_temp}" + " }\n")
     if 'XTB' in hamiltonian.upper():
         method2=f"Method = '{xtbmethod}'"+'\n\n'
         inputlines.append(method2)
@@ -367,11 +373,15 @@ def write_DFTB_input(hamiltonian,xtbmethod,xyzfilename, elems,coords,charge,mult
     f.close()
 
 
-def run_DFTB(DFTBdir, inputfile="dftb_in.hsd", outputfile="dftb+.out"):
+def run_DFTB(DFTBdir, inputfile="dftb_in.hsd", outputfile="dftb+.out", numcores=1):
     print("Running DFTB")
+    # Control DFTB+ OpenMP threading explicitly in case other interfaces
+    # mutate os.environ['OMP_NUM_THREADS'].
+    run_env = os.environ.copy()
+    run_env['OMP_NUM_THREADS'] = str(numcores)
     infile=open(inputfile)
     ofile=open(outputfile, 'w')
-    sp.run([f"{DFTBdir}/dftb+"], stdin=infile, stdout=ofile)
+    sp.run([f"{DFTBdir}/dftb+"], stdin=infile, stdout=ofile, env=run_env)
     ofile.close()
 
 
